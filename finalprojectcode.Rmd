@@ -1,0 +1,315 @@
+---
+title: "Final Project Code"
+output: html_document
+date: "2024-05-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Exploration
+
+
+Summary of df just to get an better idea of the data we have. We can see spread of the data also.
+```{r}
+df =  read.csv("Survey.csv")
+summary(df)
+
+```
+  
+```{r}
+library(faraway) 
+library(ggplot2) 
+```
+
+## Plots
+
+
+```{r}
+library(GGally)
+colnames(df)
+```
+Created a subset of the df that contains the numeric variables that we are interested in analyzing.Then created a pairwise scatterplot matrix we can see that. We were trying to get an idea of the variables that were highly correlated and we could see that no 2 variablers were highly correlated. 
+```{r}
+variables_to_keep <- c("last.night.sleep.time", "Reaction.time", "Awake.hours", "Noise.level", "Avg.hours.exercise","Avg.sleep.time","Age")
+
+dfnumeric = subset(df, select=variables_to_keep)
+ggpairs(dfnumeric)
+
+```
+```{r}
+cor(dfnumeric)
+```
+
+```{r}
+library(tidyverse)
+df %>% count(Input.device)
+```
+
+The numeric variables that appear to be the most correlated with Reaction.time are Avg.hours.exercise, Avg.sleep.time, Age, and Noise.level. We may also consider and interaction between sleep and Input device type which may affect the reaction time.
+
+## Combining multiple levels in Input.type to just 2 (button vs touch screen)
+```{r}
+
+ df <- df %>%
+mutate(Input.type = case_when(
+Input.device %in% c("Trackpad", "Touch screen")~ "Touch",
+Input.device %in% c("Game controller", "Keyboard","Mouse") ~ "Button"),
+Input.type = factor(Input.type, levels=c("Touch", "Button")))
+df %>% count(Input.type)
+
+```
+
+## Plotting variables of interest
+
+
+
+```{r}
+library(ggplot2)
+
+# Plotting
+ggplot(df, aes(x = Age, y = Reaction.time)) +
+  geom_point() +
+  ggtitle("Age vs Reaction Time")
+
+ggplot(df, aes(x = Avg.hours.exercise, y = Reaction.time)) +
+  geom_point() +
+  ggtitle("Average Hours of Exercise vs Reaction Time")
+
+ggplot(df, aes(x = Avg.sleep.time, y = Reaction.time)) +
+  geom_point() +
+  ggtitle("Average Sleep Time vs Reaction Time")
+
+ggplot(df, aes(x = Noise.level, y = Reaction.time)) +
+  geom_point() +
+  ggtitle("Noise Level vs Reaction Time")
+
+# Boxplot
+ggplot(df, aes(x = Input.type, y = Reaction.time)) +
+  geom_boxplot() +
+  ggtitle("Reaction Time by Input Type")
+
+```
+
+
+## Model Building
+```{r}
+library(lmtest)
+model1 = lm(Reaction.time~ Avg.hours.exercise+ Avg.sleep.time+Age+Noise.level,data=df)
+summary(model1)
+
+```
+### Model 1 diagnostics
+```{r}
+par(mfrow=c(2,2))
+plot(model1)
+```
+```{r}
+###high influence
+n=141
+p=5
+lev=influence(model1)$hat
+lev[lev>2*p/n]
+```
+```{r}
+plot(lev)
+abline(h=2*p/n)
+```
+There are some high leverage points, we should examine them closer
+```{r}
+halfnorm(lev,4, labs=row.names(df),ylab="leverages")
+```
+```{r}
+###outliers
+jack=rstudent(model1)
+qt(.05/(2*n),141-1-5)
+```
+```{r}
+##no outliers appear to be in the dataset
+sort(abs(jack),decreasing=TRUE)[1:8]
+```
+
+
+```{r}
+## there do not appear to be any highly influential observations since our largest cook's distance is .08 which is a lot smaller than the value of 1 required to be a highly influential observation
+cook=cooks.distance(model1)
+max(cook)
+```
+```{r}
+halfnorm(cook,labs=row.names(df),ylab="Cook's distances")
+```
+
+```{r}
+shapiro.test(model1$residuals)
+```
+H0: The normality assumption met
+
+H1: The normality assumption is not met
+
+
+Since p-value is 6.923x10^-06 we have enough statistically significant evidence to say that the normality assumption is not met. Thus we reject the null hypothesis at alpha=.05 level and conclude we do not meet the normality assumption.
+
+```{r}
+bptest(model1)
+```
+H0: We have constant variance
+
+H1: We do not have constant variance
+
+Since the p-value is .2502 we do not have enough statistically significant evidence to say that the constant variance assumption is not met. Thus we fail to reject the null hypothesis at alpha=.05 level and conclude we do have constant variance.
+
+We have to look at the boxcox plot to see what transformation to the y variable we should do to remedy the lack of normality.
+
+```{r}
+library(MASS)
+boxcox(model1, data=df)
+```
+Since lambda=-.05, we will take the inverse square root of the Y variable (Reaction time) and see if the our updated model will meet the normality assumption.
+
+### Updating the model
+
+```{r}
+library(dplyr)
+df$Inverse.Sq.Reaction.time <- (1/sqrt(df$Reaction.time))
+
+model1_updated =lm(Inverse.Sq.Reaction.time~ Avg.hours.exercise + Avg.sleep.time + Age+ Noise.level,data=df)
+summary(model1_updated)
+
+```
+```{r}
+par(mfrow=c(2,2))
+plot(model1_updated)
+```
+
+```{r}
+###high influence
+n=141
+p=5
+lev=influence(model1_updated)$hat
+lev[lev>2*p/n]
+```
+
+```{r}
+###outliers
+jack=rstudent(model1_updated)
+qt(.05/(2*n),141-1-5)
+```
+```{r}
+## there do not appear to be any outliers
+
+sort(abs(jack),decreasing=TRUE)[1:8]
+```
+
+```{r}
+## there do not appear to be any high influence points
+cook=cooks.distance(model1_updated)
+max(cook)
+```
+
+
+```{r}
+shapiro.test(model1_updated$residuals)
+```
+
+H0: The normality assumption met
+
+H1: The normality assumption is not met
+
+
+Since p-value is .6562 we do not have enough statistically significant evidence to say that the normality assumption is not met. Thus we fail to reject the null hypothesis at alpha=.05 level and conclude we do meet the normality assumption.
+
+```{r}
+bptest(model1_updated)
+```
+
+H0: We have constant variance
+
+H1: We do not have constant variance
+
+Since the p-value is .5382 we do not have enough statistically significant evidence to say that the constant variance assumption is not met. Thus we fail to reject the null hypothesis at alpha=.05 level and conclude we have constant variance.
+
+Applying the inverse transformation to the Y variable (Reaction time) appears to have fixed the problems with our assumptions.
+
+## Variable selection backwards stepwise
+
+### Backwards selection
+
+```{r}
+library(olsrr)
+best_backward_model<- ols_step_backward_p(model1_updated, p_value = 0.15, details = FALSE)
+best_backward_model
+```
+
+```{r}
+backward_model = lm(Inverse.Sq.Reaction.time~Avg.hours.exercise+Avg.sleep.time+Age, data=df)
+
+```
+
+
+## Interaction model
+
+```{r}
+model2 = lm(Reaction.time~ Avg.hours.exercise+ Age+Noise.level+Avg.sleep.time*Input.type,data=df)
+summary(model2)
+```
+## Model Comparison
+
+### Sequential ANOVA
+
+```{r}
+anova(model1_updated)
+```
+
+```{r}
+anova(model2)
+```
+
+### Best AIC model
+```{r}
+AIC(model1)
+```
+```{r}
+AIC(model2)
+```
+
+```{r}
+AIC(model1_updated)
+```
+
+```{r}
+AIC(backward_model)
+```
+
+Based on the AIC criteria, the best model is the backwards selection model. When comparing models that fit to the orignal, nontransformed reaction time variable, the best model is the interaction model.
+
+### Best BIC model
+```{r}
+BIC(model1_updated)
+```
+```{r}
+BIC(model2)
+```
+```{r}
+BIC(backward_model)
+```
+Based on the BIC criterion, the best model is also the backwards model. This makes sense as the BIC criterion prefers smaller models and is more conservative due to the nlogn selection method.
+
+### Nested Model Comparison
+
+```{r}
+anova(backward_model, model1_updated)
+```
+
+H0: The reduced model is sufficient
+
+H1: We require the full model
+
+Since p-value is greater than .05, the reduced model is sufficient and we do not require the full model (Noise level not needed)
+
+Thus our best model through F test and AIC/BIC criterion is the reduced model Inverse.Sq.Reaction.time ~ Avg.hours.exercise + Avg.sleep.time + Age
+
+
+
+
+
